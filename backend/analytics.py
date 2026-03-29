@@ -460,163 +460,88 @@ def compute_alerts(df_inc: pd.DataFrame, df_kor: pd.DataFrame) -> dict:
 # ---------------------------------------------------------------------------
 
 def compute_recommendations(df_inc: pd.DataFrame, df_kor: pd.DataFrame) -> dict:
-    recommendations = []
+    import ai_module
+    stats = collect_stats_for_ai(df_inc, df_kor)
+    try:
+        recs = ai_module.generate_ai_recommendations(stats)
+        model = recs[0].get("model", "unknown") if recs else "unknown"
+        return {"recommendations": recs, "ai_generated": True, "model": model}
+    except Exception as e:
+        print(f"[recommendations] AI failed: {e}")
+        return {"recommendations": [], "ai_generated": False, "error": str(e)}
 
-    # 1. SIZ-related violations
-    siz_mask = df_kor["Категория наблюдения"].fillna("").str.contains("СИЗ", case=False)
-    siz_count = siz_mask.sum()
-    if siz_count > 50:
-        siz_orgs = (
-            df_kor[siz_mask]["Организация"]
+
+def collect_stats_for_ai(df_inc: pd.DataFrame, df_kor: pd.DataFrame) -> dict:
+    """Collect compact statistics dict to feed into the AI prompt."""
+    stats: dict = {}
+
+    # --- incidents ---
+    if not df_inc.empty:
+        by_type = df_inc["type"].value_counts().to_dict()
+        top_orgs = (
+            df_inc["Наименование организации ДЗО"]
             .value_counts()
-            .head(5)
-            .index.tolist()
+            .head(7)
+            .reset_index()
+            .rename(columns={"Наименование организации ДЗО": "org", "count": "count"})
+            .to_dict(orient="records")
         )
-        recommendations.append(
-            {
-                "priority": "high",
-                "category": "СИЗ",
-                "title": "Усиление контроля применения СИЗ",
-                "description": (
-                    f"Зафиксировано {siz_count} наблюдений, связанных с нарушениями в применении "
-                    "средств индивидуальной защиты. Рекомендуется провести внеплановый инструктаж "
-                    "по обязательному применению СИЗ и ужесточить контроль на рабочих местах."
-                ),
-                "affected_orgs": siz_orgs,
-                "expected_reduction": "15%",
-            }
-        )
+        # pandas ≥2 .value_counts() index name differs
+        if top_orgs and "index" in top_orgs[0]:
+            top_orgs = [{"org": r["index"], "count": r["Наименование организации ДЗО"]} for r in top_orgs]
+        stats["incidents"] = {
+            "total": len(df_inc),
+            "by_type": by_type,
+            "top_orgs": top_orgs,
+        }
 
-    # 2. Repeat accidents in top org
-    top_org = (
-        df_inc["Наименование организации ДЗО"]
-        .value_counts()
-        .idxmax()
-        if len(df_inc) > 0
-        else None
-    )
-    if top_org:
-        cnt = int(df_inc["Наименование организации ДЗО"].value_counts().iloc[0])
-        recommendations.append(
-            {
-                "priority": "high",
-                "category": "Управление рисками",
-                "title": f"Аудит безопасности: {top_org}",
-                "description": (
-                    f"Организация {top_org} лидирует по числу происшествий ({cnt}). "
-                    "Рекомендуется провести комплексный аудит системы управления охраной труда, "
-                    "пересмотреть оценку рисков на рабочих местах и усилить надзор."
-                ),
-                "affected_orgs": [top_org],
-                "expected_reduction": "20%",
-            }
-        )
-
-    # 3. Traffic accidents trend
-    dtp_count = int(df_inc[df_inc["type"] == "ДТП"].shape[0])
-    if dtp_count > 5:
-        recommendations.append(
-            {
-                "priority": "medium",
-                "category": "Безопасность дорожного движения",
-                "title": "Программа снижения ДТП",
-                "description": (
-                    f"За отчётный период зафиксировано {dtp_count} дорожно-транспортных происшествий. "
-                    "Рекомендуется ввести обязательные тренинги по безопасному вождению, "
-                    "проверку технического состояния транспорта и систему контроля усталости водителей."
-                ),
-                "affected_orgs": list(
-                    df_inc[df_inc["type"] == "ДТП"]["Наименование организации ДЗО"]
-                    .dropna()
-                    .value_counts()
-                    .head(3)
-                    .index
-                ),
-                "expected_reduction": "25%",
-            }
-        )
-
-    # 4. Fire prevention
-    fire_count = int(df_inc[df_inc["type"] == "Пожар/Возгорание"].shape[0])
-    if fire_count > 0:
-        recommendations.append(
-            {
-                "priority": "medium",
-                "category": "Пожарная безопасность",
-                "title": "Усиление мер пожарной безопасности",
-                "description": (
-                    f"Зафиксировано {fire_count} случаев пожара/возгорания. "
-                    "Рекомендуется провести ревизию противопожарного оборудования, "
-                    "актуализировать планы эвакуации и организовать практические учения."
-                ),
-                "affected_orgs": list(
-                    df_inc[df_inc["type"] == "Пожар/Возгорание"]["Наименование организации ДЗО"]
-                    .dropna()
-                    .value_counts()
-                    .head(3)
-                    .index
-                ),
-                "expected_reduction": "40%",
-            }
-        )
-
-    # 5. Low resolution rate alert
-    resolved_col = "Было ли небезопасное условие / поведение исправлено и опасность устранена?"
-    if resolved_col in df_kor.columns:
+    # --- korgau ---
+    if not df_kor.empty:
         violations = df_kor[df_kor["is_violation"]]
-        if len(violations) > 0:
-            res_rate = violations[resolved_col].sum() / len(violations)
-            if res_rate < 0.70:
-                recommendations.append(
-                    {
-                        "priority": "high",
-                        "category": "Устранение нарушений",
-                        "title": "Повышение оперативности устранения нарушений",
-                        "description": (
-                            f"Только {res_rate * 100:.1f}% выявленных нарушений устраняются своевременно. "
-                            "Рекомендуется установить KPI по срокам устранения нарушений (не более 48 часов), "
-                            "внедрить эскалацию для просроченных карточек Коргау."
-                        ),
-                        "affected_orgs": list(
-                            violations[~violations[resolved_col]]["Организация"]
-                            .value_counts()
-                            .head(5)
-                            .index
-                        ),
-                        "expected_reduction": "18%",
-                    }
-                )
+        resolved_col = "Было ли небезопасное условие / поведение исправлено и опасность устранена?"
+        res_rate = None
+        if resolved_col in df_kor.columns and len(violations) > 0:
+            res_rate = float(violations[resolved_col].sum() / len(violations) * 100)
 
-    # 6. Work stoppage underutilization
-    stop_col = "Производилась ли остановка работ?"
-    if stop_col in df_kor.columns:
-        critical_violations = df_kor[
-            df_kor["Тип наблюдения"].isin(["Опасный фактор", "Опасный случай"])
-        ]
-        if len(critical_violations) > 0:
-            stop_rate = critical_violations[stop_col].sum() / len(critical_violations)
-            if stop_rate < 0.5:
-                recommendations.append(
-                    {
-                        "priority": "medium",
-                        "category": "Культура безопасности",
-                        "title": "Применение права на остановку работ",
-                        "description": (
-                            f"При опасных факторах/случаях остановка работ производилась лишь "
-                            f"в {stop_rate * 100:.1f}% случаев. Рекомендуется провести обучение "
-                            "персонала по процедуре остановки работ и подчеркнуть, что это право, "
-                            "а не нарушение трудовой дисциплины."
-                        ),
-                        "affected_orgs": [],
-                        "expected_reduction": "10%",
-                    }
-                )
+        stop_col = "Производилась ли остановка работ?"
+        stop_rate = None
+        if stop_col in df_kor.columns:
+            critical = df_kor[df_kor["Тип наблюдения"].isin(["Опасный фактор", "Опасный случай"])]
+            if len(critical) > 0:
+                stop_rate = float(critical[stop_col].sum() / len(critical) * 100)
 
-    # Sort by priority
-    priority_order = {"high": 0, "medium": 1, "low": 2}
-    recommendations.sort(key=lambda x: priority_order.get(x["priority"], 99))
+        top_cats = (
+            df_kor[df_kor["is_violation"]]["Категория наблюдения"]
+            .value_counts()
+            .head(7)
+            .reset_index()
+            .rename(columns={"Категория наблюдения": "category", "count": "count"})
+            .to_dict(orient="records")
+        )
+        if top_cats and "index" in top_cats[0]:
+            top_cats = [{"category": r["index"], "count": r["Категория наблюдения"]} for r in top_cats]
 
-    return {"recommendations": recommendations}
+        top_kor_orgs = (
+            df_kor[df_kor["is_violation"]]["Организация"]
+            .value_counts()
+            .head(7)
+            .reset_index()
+            .rename(columns={"Организация": "org", "count": "count"})
+            .to_dict(orient="records")
+        )
+        if top_kor_orgs and "index" in top_kor_orgs[0]:
+            top_kor_orgs = [{"org": r["index"], "count": r["Организация"]} for r in top_kor_orgs]
+
+        stats["korgau"] = {
+            "total": len(df_kor),
+            "violations": int(df_kor["is_violation"].sum()),
+            "resolution_rate": res_rate,
+            "stop_rate": stop_rate,
+            "top_categories": top_cats,
+            "top_orgs": top_kor_orgs,
+        }
+
+    return stats
 
 
 # ---------------------------------------------------------------------------

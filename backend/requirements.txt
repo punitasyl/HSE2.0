@@ -7,3 +7,5 @@ scikit-learn
 scipy
 statsmodels
 python-multipart
+openai
+python-dotenv

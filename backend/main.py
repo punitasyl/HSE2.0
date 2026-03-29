@@ -3,17 +3,21 @@ HSE Analytics API — FastAPI backend
 Run: uvicorn main:app --reload --port 8001
 """
 
+import os
+import sys
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
-import os
-import sys
 
 # Make sure analytics module is importable
 sys.path.insert(0, os.path.dirname(__file__))
 
 import analytics as an
+import ai_module
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
@@ -130,6 +134,7 @@ def alerts():
 @app.get("/api/recommendations")
 def recommendations():
     return an.compute_recommendations(incidents_df, korgau_df)
+
 
 
 @app.get("/api/economic-effect")
