@@ -32,6 +32,8 @@ export default function Predictions() {
 
   const trend = data.model_metrics?.trend
   const mae = data.model_metrics?.mae
+  const method = data.model_metrics?.method ?? 'ARIMA'
+  const aic = data.model_metrics?.aic
 
   // Build combined chart data
   const historical = (data.historical || []).map((h: any) => ({
@@ -252,14 +254,23 @@ export default function Predictions() {
       {/* Model info */}
       <div className="card bg-slate-800/50">
         <h3 className="text-sm font-semibold text-slate-300 mb-2">О модели</h3>
-        <p className="text-xs text-slate-500 leading-relaxed">
-          Прогноз построен на основе линейной регрессии (тренд) + синусоидальная сезонная компонента.
-          Доверительный интервал рассчитан на уровне 95% (±1.96σ остатков).
-          MAE на тестовой выборке: <span className="text-slate-300">{mae}</span> инцидентов.
-          Тренд: <span className={trend === 'decreasing' ? 'text-emerald-400' : 'text-red-400'}>
-            {trend === 'decreasing' ? 'убывающий' : 'возрастающий'}
-          </span>.
-        </p>
+        <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+          <span>
+            Метод: <span className="text-violet-400 font-medium">{method}</span>
+            <span className="ml-1 text-slate-600">(Time Series Analysis)</span>
+          </span>
+          {aic != null && (
+            <span>AIC: <span className="text-slate-300">{aic}</span></span>
+          )}
+          <span>MAE: <span className="text-slate-300">{mae}</span> инц./мес.</span>
+          <span>
+            Тренд:{' '}
+            <span className={trend === 'decreasing' ? 'text-emerald-400' : 'text-red-400'}>
+              {trend === 'decreasing' ? 'убывающий' : 'возрастающий'}
+            </span>
+          </span>
+          <span className="text-slate-600">Доверительный интервал 95%</span>
+        </div>
       </div>
     </div>
   )

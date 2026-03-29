@@ -8,7 +8,8 @@ import sys
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from typing import List
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
@@ -142,6 +143,13 @@ def economic_effect():
     if incidents_df.empty:
         raise HTTPException(status_code=500, detail="incidents data not loaded")
     return an.compute_economic_effect(incidents_df)
+
+
+@app.get("/api/scenario")
+def scenario(measures: List[str] = Query(default=[])):
+    if incidents_df.empty:
+        raise HTTPException(status_code=500, detail="incidents data not loaded")
+    return an.compute_scenario(incidents_df, measures)
 
 
 @app.get("/api/correlation")

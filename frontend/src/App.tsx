@@ -9,6 +9,7 @@ import {
   Lightbulb,
   DollarSign,
   Shield,
+  FlaskConical,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
@@ -21,6 +22,7 @@ import AlertsPanel from './components/AlertsPanel'
 import RiskZones from './components/RiskZones'
 import Recommendations from './components/Recommendations'
 import EconomicEffect from './components/EconomicEffect'
+import Scenarios from './components/Scenarios'
 
 type Page =
   | 'dashboard'
@@ -31,6 +33,7 @@ type Page =
   | 'risk-zones'
   | 'recommendations'
   | 'economic'
+  | 'scenarios'
 
 interface NavItem {
   id: Page
@@ -46,6 +49,7 @@ const navItems: NavItem[] = [
   { id: 'alerts',          label: 'Алерты',              icon: <Bell size={20} /> },
   { id: 'risk-zones',      label: 'Зоны риска',          icon: <MapPin size={20} /> },
   { id: 'recommendations', label: 'Рекомендации',        icon: <Lightbulb size={20} /> },
+  { id: 'scenarios',       label: 'Сценарии',            icon: <FlaskConical size={20} /> },
   { id: 'economic',        label: 'Экономический эффект', icon: <DollarSign size={20} /> },
 ]
 
@@ -62,6 +66,7 @@ export default function App() {
       case 'alerts':          return <AlertsPanel />
       case 'risk-zones':      return <RiskZones />
       case 'recommendations': return <Recommendations />
+      case 'scenarios':       return <Scenarios />
       case 'economic':        return <EconomicEffect />
       default:                return <Dashboard onNavigate={setPage} />
     }

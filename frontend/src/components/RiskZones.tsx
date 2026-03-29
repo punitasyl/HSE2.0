@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts'
-import { MapPin, Building2, AlertTriangle } from 'lucide-react'
+import { MapPin, Building2, AlertTriangle, TrendingUp } from 'lucide-react'
 
 const API = ''
 
@@ -160,7 +160,7 @@ export default function RiskZones() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-700">
-                {['#', 'Организация', 'Происшествий', 'Нарушений (Коргау)', 'Индекс риска', 'Уровень'].map((h) => (
+                {['#', 'Организация', 'Происшествий', 'Несч. случаев', 'Нарушений', 'Тренд', 'Индекс риска', 'Уровень'].map((h) => (
                   <th
                     key={h}
                     className="text-left py-2 px-3 text-xs font-medium text-slate-400 uppercase tracking-wide"
@@ -184,7 +184,15 @@ export default function RiskZones() {
                     <span className="text-sm font-bold text-red-400">{row.incident_count}</span>
                   </td>
                   <td className="py-2.5 px-3 text-center">
+                    <span className="text-sm font-semibold text-rose-300">{row.accidents ?? 0}</span>
+                  </td>
+                  <td className="py-2.5 px-3 text-center">
                     <span className="text-sm font-semibold text-orange-400">{row.violations}</span>
+                  </td>
+                  <td className="py-2.5 px-3 text-center">
+                    {row.trend_growing
+                      ? <TrendingUp size={14} className="text-red-400 mx-auto" />
+                      : <span className="text-slate-600 text-xs">—</span>}
                   </td>
                   <td className="py-2.5 px-3">
                     <div className="flex items-center gap-2">
@@ -218,9 +226,9 @@ export default function RiskZones() {
       {/* Formula note */}
       <div className="card bg-slate-800/40 border-slate-700/50">
         <p className="text-xs text-slate-500">
-          <span className="text-slate-400 font-medium">Методика расчёта:</span>{' '}
-          Индекс риска = (Происшествий × 10 + Нарушений Коргау × 2) / макс. значение × 100.
-          Отражает совокупную нагрузку происшествий и нарушений на организацию.
+          <span className="text-slate-400 font-medium">Методика расчёта (Risk Scoring):</span>{' '}
+          Индекс = (Происшествий × 10 + Несч. случаев × 30 + Нарушений × 2 + Тренд роста +15 − Устранение &gt;80% −10) / макс × 100.
+          Учитывает тяжесть инцидентов, динамику роста и культуру устранения нарушений.
         </p>
       </div>
     </div>

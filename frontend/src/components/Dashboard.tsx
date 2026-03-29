@@ -329,10 +329,10 @@ export default function Dashboard({ onNavigate }: Props) {
       {/* Quick links */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: 'Алерты',          page: 'alerts',          color: 'text-red-400 border-red-500/30 hover:bg-red-500/10' },
-          { label: 'Прогноз',         page: 'predictions',     color: 'text-blue-400 border-blue-500/30 hover:bg-blue-500/10' },
-          { label: 'Рекомендации',    page: 'recommendations', color: 'text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10' },
-          { label: 'Экономика',       page: 'economic',        color: 'text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10' },
+          { label: 'Алерты',       page: 'alerts',          color: 'text-red-400 border-red-500/30 hover:bg-red-500/10' },
+          { label: 'Прогноз',      page: 'predictions',     color: 'text-blue-400 border-blue-500/30 hover:bg-blue-500/10' },
+          { label: 'Сценарии',     page: 'scenarios',       color: 'text-violet-400 border-violet-500/30 hover:bg-violet-500/10' },
+          { label: 'Рекомендации', page: 'recommendations', color: 'text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10' },
         ].map((item) => (
           <button
             key={item.page}

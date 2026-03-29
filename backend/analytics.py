@@ -3,11 +3,11 @@ HSE Analytics computation module.
 All heavy data processing and ML logic lives here.
 """
 
+import warnings
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error
+from statsmodels.tsa.arima.model import ARIMA
 from scipy.stats import pearsonr
 from typing import Any
 
@@ -146,63 +146,85 @@ def compute_predictions(df: pd.DataFrame) -> dict:
 
     counts = monthly["count"].values.astype(float)
     n = len(counts)
-    X = np.arange(n).reshape(-1, 1)
 
-    # Linear trend
-    lr = LinearRegression()
-    lr.fit(X, counts)
-    trend_vals = lr.predict(X)
-    residuals = counts - trend_vals
+    # Auto-select ARIMA(p,d,q) order by AIC
+    best_aic = np.inf
+    best_result = None
+    best_order = (1, 1, 1)
 
-    # Simple seasonality: fit sine wave on residuals
-    best_amp, best_phase, best_period = 0.0, 0.0, 12
+    if n >= 10:
+        for p in range(3):
+            for d in range(2):
+                for q in range(3):
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            res = ARIMA(counts, order=(p, d, q)).fit()
+                        if res.aic < best_aic:
+                            best_aic = res.aic
+                            best_result = res
+                            best_order = (p, d, q)
+                    except Exception:
+                        continue
+
+    if best_result is None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            best_result = ARIMA(counts, order=(1, 1, 1)).fit()
+        best_order = (1, 1, 1)
+        best_aic = float(best_result.aic)
+
+    # MAE on in-sample fitted values
+    fv = best_result.fittedvalues
+    mae = float(np.mean(np.abs(counts[-len(fv):] - fv)))
+
+    # Trend direction: compare last 3 months vs previous 3 months
     if n >= 6:
-        for period in [12, 6]:
-            for phase in np.linspace(0, 2 * np.pi, 20):
-                amp = np.std(residuals)
-                fitted = amp * np.sin(2 * np.pi * X.flatten() / period + phase)
-                err = np.mean((residuals - fitted) ** 2)
-                if err < np.mean(residuals**2):
-                    best_amp = amp
-                    best_phase = phase
-                    best_period = period
+        trend_direction = "decreasing" if np.mean(counts[-3:]) < np.mean(counts[-6:-3]) else "increasing"
+    else:
+        trend_direction = "decreasing" if counts[-1] < counts[0] else "increasing"
 
-    # MAE on in-sample
-    in_sample = trend_vals + best_amp * np.sin(
-        2 * np.pi * np.arange(n) / best_period + best_phase
-    )
-    mae = float(mean_absolute_error(counts, in_sample))
-
-    trend_direction = "decreasing" if lr.coef_[0] < 0 else "increasing"
-
-    # Forecast next 12 months
+    # Forecast 12 months with 95% confidence interval
     last_month = pd.Period(monthly["month_str"].iloc[-1], freq="M")
-    forecast = []
-    std_res = float(np.std(residuals)) if n > 1 else 1.0
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fc = best_result.get_forecast(steps=12)
 
-    for i in range(1, 13):
-        future_idx = n - 1 + i
-        pred = float(
-            lr.predict([[future_idx]])[0]
-            + best_amp * np.sin(2 * np.pi * future_idx / best_period + best_phase)
-        )
-        pred = max(0.0, pred)
-        lower = max(0.0, pred - 1.96 * std_res)
-        upper = pred + 1.96 * std_res
-        month_label = str(last_month + i)
-        forecast.append(
-            {
-                "month": month_label,
-                "predicted": round(pred, 1),
-                "lower": round(lower, 1),
-                "upper": round(upper, 1),
-            }
-        )
+    fc_mean_raw = fc.predicted_mean
+    fc_ci = fc.conf_int(alpha=0.05)
+
+    # conf_int() may return DataFrame or ndarray depending on statsmodels version
+    if hasattr(fc_ci, "columns"):
+        lower_vals = fc_ci.iloc[:, 0].values
+        upper_vals = fc_ci.iloc[:, 1].values
+    else:
+        lower_vals = np.asarray(fc_ci)[:, 0]
+        upper_vals = np.asarray(fc_ci)[:, 1]
+
+    fc_mean_arr = np.asarray(fc_mean_raw)
+
+    forecast = []
+    for i in range(12):
+        pred = max(0.0, float(fc_mean_arr[i]))
+        lower = max(0.0, float(lower_vals[i]))
+        upper = float(upper_vals[i])
+        month_label = str(last_month + i + 1)
+        forecast.append({
+            "month": month_label,
+            "predicted": round(pred, 1),
+            "lower": round(lower, 1),
+            "upper": round(upper, 1),
+        })
 
     return {
         "historical": historical,
         "forecast": forecast,
-        "model_metrics": {"mae": round(mae, 2), "trend": trend_direction},
+        "model_metrics": {
+            "mae": round(mae, 2),
+            "trend": trend_direction,
+            "method": f"ARIMA{best_order}",
+            "aic": round(float(best_aic), 1),
+        },
     }
 
 
@@ -211,50 +233,122 @@ def compute_predictions(df: pd.DataFrame) -> dict:
 # ---------------------------------------------------------------------------
 
 def compute_risk_zones(df_inc: pd.DataFrame, df_kor: pd.DataFrame) -> dict:
-    # Violations from koргau per org
-    violations_by_org = (
-        df_kor[df_kor["is_violation"]]
-        .groupby("Организация")
-        .size()
-        .reset_index(name="violations")
-    )
+    resolved_col = "Было ли небезопасное условие / поведение исправлено и опасность устранена?"
 
-    # Incidents per org
-    inc_by_org = (
-        df_inc.groupby("Наименование организации ДЗО")
-        .size()
-        .reset_index(name="incident_count")
-        .rename(columns={"Наименование организации ДЗО": "org"})
-    )
+    # --- Incidents per org ---
+    if not df_inc.empty:
+        inc_by_org = (
+            df_inc.groupby("Наименование организации ДЗО")
+            .size()
+            .reset_index(name="incident_count")
+            .rename(columns={"Наименование организации ДЗО": "org"})
+        )
+        acc_by_org = (
+            df_inc[df_inc["type"] == "Несчастный случай"]
+            .groupby("Наименование организации ДЗО")
+            .size()
+            .reset_index(name="accidents")
+            .rename(columns={"Наименование организации ДЗО": "org"})
+        )
+    else:
+        inc_by_org = pd.DataFrame(columns=["org", "incident_count"])
+        acc_by_org = pd.DataFrame(columns=["org", "accidents"])
 
-    # Merge
-    merged = inc_by_org.merge(
-        violations_by_org.rename(columns={"Организация": "org"}),
-        on="org",
-        how="outer",
-    ).fillna(0)
+    # --- Violations per org (Korgau) ---
+    if not df_kor.empty:
+        violations_by_org = (
+            df_kor[df_kor["is_violation"]]
+            .groupby("Организация")
+            .size()
+            .reset_index(name="violations")
+            .rename(columns={"Организация": "org"})
+        )
+    else:
+        violations_by_org = pd.DataFrame(columns=["org", "violations"])
+
+    # --- Resolution rate per org ---
+    if not df_kor.empty and resolved_col in df_kor.columns:
+        viol_df = df_kor[df_kor["is_violation"]].copy()
+        res_by_org = (
+            viol_df.groupby("Организация")
+            .agg(total_viol=("is_violation", "count"), resolved=(resolved_col, "sum"))
+            .reset_index()
+            .rename(columns={"Организация": "org"})
+        )
+        res_by_org["res_rate"] = res_by_org["resolved"] / res_by_org["total_viol"].clip(lower=1)
+        res_by_org = res_by_org[["org", "res_rate"]]
+    else:
+        res_by_org = None
+
+    # --- Trend: incidents growing? (last 6 vs prev 6 months) ---
+    trend_growing: dict = {}
+    if not df_inc.empty:
+        max_date = df_inc["date"].max()
+        mid = max_date - pd.DateOffset(months=6)
+        start = max_date - pd.DateOffset(months=12)
+        recent_cnt = (
+            df_inc[df_inc["date"] > mid]
+            .groupby("Наименование организации ДЗО").size().rename("recent")
+        )
+        prev_cnt = (
+            df_inc[(df_inc["date"] > start) & (df_inc["date"] <= mid)]
+            .groupby("Наименование организации ДЗО").size().rename("prev")
+        )
+        trend_df = pd.concat([recent_cnt, prev_cnt], axis=1).fillna(0)
+        trend_growing = {
+            org: bool(row["recent"] > row["prev"])
+            for org, row in trend_df.iterrows()
+        }
+
+    # --- Merge all ---
+    merged = inc_by_org.merge(acc_by_org, on="org", how="outer")
+    merged = merged.merge(violations_by_org, on="org", how="outer")
+    if res_by_org is not None and len(res_by_org) > 0:
+        merged = merged.merge(res_by_org, on="org", how="left")
+    else:
+        merged["res_rate"] = 0.0
+    merged = merged.fillna(0)
+
+    # --- Risk Score formula ---
+    # score = incidents×10 + accidents×30 + violations×2 + trend_penalty(+15) - resolution_bonus(-10)
+    def raw_score(row: pd.Series) -> float:
+        trend_penalty = 15.0 if trend_growing.get(row["org"], False) else 0.0
+        res_bonus = 10.0 if row.get("res_rate", 0.0) >= 0.8 else 0.0
+        return (
+            row["incident_count"] * 10.0
+            + row["accidents"] * 30.0
+            + row["violations"] * 2.0
+            + trend_penalty
+            - res_bonus
+        )
 
     if len(merged) > 0:
-        max_score = (merged["incident_count"] * 10 + merged["violations"] * 2).max()
-        if max_score == 0:
-            max_score = 1
-        merged["risk_score"] = (
-            (merged["incident_count"] * 10 + merged["violations"] * 2) / max_score * 100
-        ).round(1)
+        merged["_raw"] = merged.apply(raw_score, axis=1)
+        max_raw = merged["_raw"].max()
+        merged["risk_score"] = (merged["_raw"] / max(float(max_raw), 1.0) * 100).round(1)
     else:
-        merged["risk_score"] = 0
+        merged["risk_score"] = 0.0
 
-    top_orgs = (
-        merged.sort_values("risk_score", ascending=False)
-        .head(10)
-        .to_dict(orient="records")
-    )
-    for r in top_orgs:
-        r["incident_count"] = int(r["incident_count"])
-        r["violations"] = int(r["violations"])
-        r["risk_score"] = float(r["risk_score"])
+    def risk_level(score: float) -> str:
+        if score >= 70: return "critical"
+        if score >= 40: return "high"
+        if score >= 20: return "medium"
+        return "low"
 
-    # Top locations by incident count
+    top_orgs_rows = merged.sort_values("risk_score", ascending=False).head(10).to_dict(orient="records")
+    top_orgs = []
+    for r in top_orgs_rows:
+        top_orgs.append({
+            "org": r["org"],
+            "incident_count": int(r["incident_count"]),
+            "accidents": int(r["accidents"]),
+            "violations": int(r["violations"]),
+            "risk_score": float(r["risk_score"]),
+            "risk_level": risk_level(float(r["risk_score"])),
+            "trend_growing": trend_growing.get(r["org"], False),
+        })
+
+    # --- Top locations ---
     loc_counts = (
         df_inc["Место происшествия"]
         .fillna("Не указано")
@@ -263,7 +357,7 @@ def compute_risk_zones(df_inc: pd.DataFrame, df_kor: pd.DataFrame) -> dict:
         .reset_index()
     )
     loc_counts.columns = ["location", "count"]
-    max_loc = loc_counts["count"].max() if len(loc_counts) > 0 else 1
+    max_loc = int(loc_counts["count"].max()) if len(loc_counts) > 0 else 1
     loc_counts["risk_score"] = (loc_counts["count"] / max_loc * 100).round(1)
     top_locations = loc_counts.to_dict(orient="records")
 
@@ -684,4 +778,80 @@ def compute_correlation(df_inc: pd.DataFrame, df_kor: pd.DataFrame) -> dict:
         "correlation_coefficient": round(float(best_corr), 4),
         "lag_days": int(lag_days),
         "description": desc,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Scenario Modeling
+# ---------------------------------------------------------------------------
+
+MEASURE_EFFECTS: dict[str, dict] = {
+    "siz_control":       {"label": "Усиление контроля СИЗ",           "reduction": 0.15},
+    "risk_audit":        {"label": "Аудит системы управления рисками", "reduction": 0.20},
+    "driver_training":   {"label": "Тренинги безопасного вождения",    "reduction": 0.25},
+    "fire_prevention":   {"label": "Меры пожарной безопасности",       "reduction": 0.40},
+    "korgau_kpi":        {"label": "KPI устранения нарушений 48ч",     "reduction": 0.18},
+    "stop_work_culture": {"label": "Культура остановки работ",         "reduction": 0.10},
+    "near_miss_program": {"label": "Программа near-miss reporting",    "reduction": 0.22},
+}
+
+_MAX_COMBINED_REDUCTION = 0.70
+_COST_PER_INCIDENT_KZT = 1_500_000  # weighted KZT average (oil & gas sector)
+
+
+def compute_scenario(df_inc: pd.DataFrame, measures: list[str]) -> dict:
+    """
+    Scenario Modeling: calculate expected incident reduction and economic saving
+    when a set of control measures is applied.
+
+    Combined effect uses independent probability formula:
+        combined = 1 - ∏(1 - r_i)
+    Capped at MAX_COMBINED_REDUCTION (70%) for realism.
+    """
+    monthly = (
+        df_inc.groupby("month_str").size().reset_index(name="count").sort_values("month_str")
+    )
+    last_12 = monthly.tail(12)
+    baseline_monthly = float(last_12["count"].mean()) if len(last_12) > 0 else 0.0
+    baseline_annual = baseline_monthly * 12.0
+
+    valid = [m for m in measures if m in MEASURE_EFFECTS]
+
+    if valid:
+        combined = 1.0 - float(np.prod([1.0 - MEASURE_EFFECTS[m]["reduction"] for m in valid]))
+        combined = min(combined, _MAX_COMBINED_REDUCTION)
+    else:
+        combined = 0.0
+
+    projected_monthly = baseline_monthly * (1.0 - combined)
+    projected_annual = projected_monthly * 12.0
+    saved_incidents = baseline_annual - projected_annual
+    economic_saving_kzt = saved_incidents * _COST_PER_INCIDENT_KZT
+
+    breakdown = [
+        {
+            "key": m,
+            "label": MEASURE_EFFECTS[m]["label"],
+            "reduction_pct": round(MEASURE_EFFECTS[m]["reduction"] * 100, 1),
+            "incidents_saved": round(baseline_annual * MEASURE_EFFECTS[m]["reduction"], 1),
+        }
+        for m in valid
+    ]
+
+    available = [
+        {"key": k, "label": v["label"], "reduction_pct": round(v["reduction"] * 100, 1)}
+        for k, v in MEASURE_EFFECTS.items()
+    ]
+
+    return {
+        "baseline_monthly": round(baseline_monthly, 1),
+        "baseline_annual": round(baseline_annual, 1),
+        "projected_monthly": round(projected_monthly, 1),
+        "projected_annual": round(projected_annual, 1),
+        "combined_reduction_pct": round(combined * 100, 1),
+        "incidents_saved_annual": round(saved_incidents, 1),
+        "economic_saving_kzt": int(economic_saving_kzt),
+        "measures_applied": valid,
+        "breakdown": breakdown,
+        "available_measures": available,
     }
