@@ -11,6 +11,8 @@ import {
   Flame,
   CheckCircle,
   Zap,
+  Sparkles,
+  RefreshCw,
 } from 'lucide-react'
 
 const API = ''
@@ -22,6 +24,8 @@ interface Recommendation {
   description: string
   affected_orgs: string[]
   expected_reduction: string
+  ai_generated?: boolean
+  model?: string
 }
 
 const PRIORITY_CONFIG = {
@@ -80,6 +84,11 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
               <span className="text-xs text-slate-500 bg-slate-700/50 px-2 py-0.5 rounded">
                 {rec.category}
               </span>
+              {rec.ai_generated && (
+                <span className="text-xs bg-violet-500/20 text-violet-300 px-2 py-0.5 rounded flex items-center gap-1">
+                  <Sparkles size={10} /> AI
+                </span>
+              )}
             </div>
             <h3 className="text-sm font-semibold text-slate-200">{rec.title}</h3>
           </div>
@@ -125,7 +134,6 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
             <p className="text-sm font-bold text-emerald-400">{rec.expected_reduction}</p>
           </div>
 
-          {/* Reduction bar */}
           <div>
             <div className="w-full bg-slate-700 rounded-full h-2">
               <div
@@ -141,18 +149,25 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
 }
 
 export default function Recommendations() {
-  const [data, setData] = useState<{ recommendations: Recommendation[] } | null>(null)
+  const [data, setData] = useState<{
+    recommendations: Recommendation[]
+    model?: string
+    error?: string
+  } | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const load = () => {
+    setLoading(true)
     fetch(`${API}/api/recommendations`)
       .then((r) => r.json())
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [])
+  }
 
-  if (loading) return <div className="text-slate-400 text-sm animate-pulse">Загрузка...</div>
+  useEffect(() => { load() }, [])
+
+  if (loading) return <div className="text-slate-400 text-sm animate-pulse">Генерация AI-рекомендаций...</div>
   if (!data) return <div className="card text-red-400">Ошибка загрузки данных.</div>
 
   const recs = data.recommendations || []
@@ -192,19 +207,32 @@ export default function Recommendations() {
         </div>
       </div>
 
-      {/* AI note */}
-      <div className="card bg-blue-500/5 border-blue-500/20">
-        <div className="flex items-start gap-3">
-          <div className="p-2 bg-blue-500/10 rounded-lg flex-shrink-0">
-            <Lightbulb size={18} className="text-blue-400" />
+      {/* AI banner */}
+      <div className="card bg-violet-500/5 border-violet-500/20">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-violet-500/10 rounded-lg flex-shrink-0">
+              <Sparkles size={18} className="text-violet-400" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-slate-200">
+                Рекомендации сгенерированы{' '}
+                {data.model && <span className="text-violet-300">{data.model}</span>}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                На основе анализа инцидентов и нарушений Коргау. Используется OpenAI API или Ollama Llama 3.2.
+              </p>
+              {data.error && (
+                <p className="text-xs text-red-400 mt-1">{data.error}</p>
+              )}
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-medium text-slate-200">AI-аналитика на основе данных</p>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              Рекомендации сформированы автоматически на основе анализа паттернов инцидентов и
-              нарушений из системы Коргау. Нажмите на рекомендацию для просмотра деталей.
-            </p>
-          </div>
+          <button
+            onClick={load}
+            className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
+          >
+            <RefreshCw size={13} /> Обновить
+          </button>
         </div>
       </div>
 
