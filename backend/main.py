@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import analytics as an
 import ai_module
+import data_source as ds
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
@@ -43,57 +44,20 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Data loading
+# Data loading  (delegates to data_source.py — Excel / DB / REST API)
 # ---------------------------------------------------------------------------
 
-DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+print(f"Data backend: {ds.active_backend().upper()}")
 
-
-def load_incidents() -> pd.DataFrame:
-    path = os.path.join(DATA_DIR, "incidents.xlsx")
-    df = pd.read_excel(path)
-
-    df["date"] = pd.to_datetime(df["Дата возникновения происшествия"], errors="coerce")
-    df = df.dropna(subset=["date"])
-    df["year"] = df["date"].dt.year
-    df["month_str"] = df["date"].dt.strftime("%Y-%m")
-    df["type"] = df.apply(an.get_incident_type, axis=1)
-
-    return df
-
-
-def load_korgau() -> pd.DataFrame:
-    path = os.path.join(DATA_DIR, "korgau_cards.xlsx")
-    df = pd.read_excel(path)
-
-    df["date"] = pd.to_datetime(df["Дата"], errors="coerce")
-    # Filter to reasonable date range (ignore obvious outliers like 1965)
-    df = df[df["date"].dt.year >= 2020].dropna(subset=["date"])
-    df["month_str"] = df["date"].dt.strftime("%Y-%m")
-    df["is_violation"] = df["Тип наблюдения"].fillna("").isin(
-        [
-            "Небезопасное условие",
-            "Небезопасное условие ",  # trailing space variant in data
-            "Небезопасное поведение",
-            "Небезопасное действие",
-            "Опасный фактор",
-            "Опасный случай",
-        ]
-    )
-
-    return df
-
-
-# Load once at startup
 try:
-    incidents_df = load_incidents()
+    incidents_df = ds.load_incidents()
     print(f"Loaded incidents: {len(incidents_df)} rows")
 except Exception as e:
     print(f"ERROR loading incidents: {e}")
     incidents_df = pd.DataFrame()
 
 try:
-    korgau_df = load_korgau()
+    korgau_df = ds.load_korgau()
     print(f"Loaded korgau: {len(korgau_df)} rows")
 except Exception as e:
     print(f"ERROR loading korgau: {e}")
@@ -255,6 +219,7 @@ def correlation():
 def health():
     return {
         "status": "ok",
+        "data_backend": ds.active_backend(),
         "incidents_rows": len(incidents_df),
         "korgau_rows": len(korgau_df),
     }

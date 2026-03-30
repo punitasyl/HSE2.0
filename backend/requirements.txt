@@ -9,3 +9,12 @@ statsmodels
 python-multipart
 openai
 python-dotenv
+
+# Optional — only needed for DATA_SOURCE=db
+# sqlalchemy
+# psycopg2-binary          # PostgreSQL
+# pyodbc                   # MSSQL (also needs ODBC driver installed)
+# cx_oracle                # Oracle
+
+# Optional — only needed for DATA_SOURCE=api
+# httpx
