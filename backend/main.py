@@ -95,18 +95,19 @@ def incidents_list():
 
 @app.get(
     "/api/predictions",
-    summary="12-month ARIMA incident forecast",
+    summary="Multi-model incident forecast (12 months)",
     description=(
-        "Fits ARIMA(p,d,q) with automatic order selection by AIC. "
-        "Returns historical series, 12-month forecast with 95% CI, "
-        "and out-of-sample backtesting metrics (MAE, RMSE, MAPE)."
+        "Runs one or more ML models and returns 12-month forecasts with 95% CI and backtesting metrics. "
+        "Available models: **arima** (ARIMA auto-AIC), **ets** (Holt-Winters), **linear** (LinearRegression), "
+        "**linsine** (LinReg+Sine seasonality), **gbr** (Gradient Boosting), **lstm** (LSTM-inspired). "
+        "Pass `?models=arima&models=ets` to compare. Default: arima."
     ),
     tags=["Predictive Analytics"],
 )
-def predictions():
+def predictions(models: List[str] = Query(default=["arima"])):
     if incidents_df.empty:
         raise HTTPException(status_code=500, detail="incidents data not loaded")
-    return an.compute_predictions(incidents_df)
+    return an.compute_predictions(incidents_df, models=models)
 
 
 @app.get(
