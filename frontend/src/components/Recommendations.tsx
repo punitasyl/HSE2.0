@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import {
   Lightbulb,
   ChevronDown,
@@ -13,6 +13,8 @@ import {
   Zap,
   Sparkles,
   RefreshCw,
+  Clock,
+  ListChecks,
 } from 'lucide-react'
 
 const API = ''
@@ -24,6 +26,8 @@ interface Recommendation {
   description: string
   affected_orgs: string[]
   expected_reduction: string
+  timeline?: string
+  steps?: string[]
   ai_generated?: boolean
   model?: string
 }
@@ -84,6 +88,11 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
               <span className="text-xs text-slate-500 bg-slate-700/50 px-2 py-0.5 rounded">
                 {rec.category}
               </span>
+              {rec.timeline && (
+                <span className="text-xs bg-slate-700/70 text-slate-400 px-2 py-0.5 rounded flex items-center gap-1">
+                  <Clock size={10} /> {rec.timeline}
+                </span>
+              )}
               {rec.ai_generated && (
                 <span className="text-xs bg-violet-500/20 text-violet-300 px-2 py-0.5 rounded flex items-center gap-1">
                   <Sparkles size={10} /> AI
@@ -129,6 +138,24 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
             </div>
           )}
 
+          {rec.steps && rec.steps.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-slate-400 mb-2 flex items-center gap-1">
+                <ListChecks size={12} /> Шаги реализации
+              </p>
+              <ol className="space-y-1.5">
+                {rec.steps.map((step, i) => (
+                  <li key={i} className="flex items-start gap-2 text-xs text-slate-400">
+                    <span className="flex-shrink-0 w-4 h-4 rounded-full bg-slate-700 text-slate-300 flex items-center justify-center text-[10px] font-bold mt-0.5">
+                      {i + 1}
+                    </span>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+
           <div className="flex items-center gap-2">
             <p className="text-xs text-slate-500">Ожидаемое снижение инцидентов:</p>
             <p className="text-sm font-bold text-emerald-400">{rec.expected_reduction}</p>
@@ -148,27 +175,60 @@ function RecommendationCard({ rec }: { rec: Recommendation }) {
   )
 }
 
-export default function Recommendations() {
-  const [data, setData] = useState<{
-    recommendations: Recommendation[]
-    model?: string
-    error?: string
-  } | null>(null)
-  const [loading, setLoading] = useState(true)
+const CACHE_KEY = 'hse_recommendations_cache'
 
-  const load = () => {
-    setLoading(true)
+type RecsData = {
+  recommendations: Recommendation[]
+  model?: string
+  error?: string
+  cached_at?: string
+}
+
+export default function Recommendations() {
+  const [data, setData] = useState<RecsData | null>(() => {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY)
+      return raw ? (JSON.parse(raw) as RecsData) : null
+    } catch {
+      return null
+    }
+  })
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+
+  const refresh = () => {
+    setRefreshing(true)
+    setRefreshError(null)
     fetch(`${API}/api/recommendations`)
       .then((r) => r.json())
-      .then(setData)
-      .catch(console.error)
-      .finally(() => setLoading(false))
+      .then((d: RecsData) => {
+        const withTs = { ...d, cached_at: new Date().toLocaleString('ru-RU') }
+        setData(withTs)
+        localStorage.setItem(CACHE_KEY, JSON.stringify(withTs))
+      })
+      .catch((e) => setRefreshError(String(e)))
+      .finally(() => setRefreshing(false))
   }
 
-  useEffect(() => { load() }, [])
-
-  if (loading) return <div className="text-slate-400 text-sm animate-pulse">Генерация AI-рекомендаций...</div>
-  if (!data) return <div className="card text-red-400">Ошибка загрузки данных.</div>
+  if (!data) {
+    return (
+      <div className="card text-center py-16">
+        <Sparkles size={32} className="text-violet-400 mx-auto mb-3" />
+        <p className="text-slate-300 font-medium mb-1">Рекомендации ещё не сгенерированы</p>
+        <p className="text-xs text-slate-500 mb-4">Нажмите кнопку, чтобы запустить AI-анализ</p>
+        <button
+          onClick={refresh}
+          disabled={refreshing}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          {refreshing
+            ? <><RefreshCw size={14} className="animate-spin" /> Генерация...</>
+            : <><Sparkles size={14} /> Сгенерировать</>}
+        </button>
+        {refreshError && <p className="text-xs text-red-400 mt-3">{refreshError}</p>}
+      </div>
+    )
+  }
 
   const recs = data.recommendations || []
   const high = recs.filter((r) => r.priority === 'high').length
@@ -228,7 +288,7 @@ export default function Recommendations() {
             </div>
           </div>
           <button
-            onClick={load}
+            onClick={refresh}
             className="flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
           >
             <RefreshCw size={13} /> Обновить

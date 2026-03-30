@@ -32,8 +32,12 @@ export default function Predictions() {
 
   const trend = data.model_metrics?.trend
   const mae = data.model_metrics?.mae
+  const rmse = data.model_metrics?.rmse
+  const mape = data.model_metrics?.mape
+  const baselineMae = data.model_metrics?.baseline_mae
   const method = data.model_metrics?.method ?? 'ARIMA'
   const aic = data.model_metrics?.aic
+  const backtesting: any[] = data.backtesting || []
 
   // Build combined chart data
   const historical = (data.historical || []).map((h: any) => ({
@@ -90,7 +94,9 @@ export default function Predictions() {
             <p className={`text-lg font-bold mt-1 ${trend === 'decreasing' ? 'text-emerald-400' : 'text-red-400'}`}>
               {trend === 'decreasing' ? 'Снижение' : 'Рост'}
             </p>
-            <p className="text-xs text-slate-500">MAE: {mae}</p>
+            <p className="text-xs text-slate-500">
+              MAE: {mae}{rmse != null ? ` · RMSE: ${rmse}` : ''}{mape != null ? ` · MAPE: ${mape}%` : ''}
+            </p>
           </div>
         </div>
 
@@ -250,6 +256,57 @@ export default function Predictions() {
           </table>
         </div>
       </div>
+
+      {/* Backtesting */}
+      {backtesting.length > 0 && (
+        <div className="card">
+          <h2 className="section-title">Бэктестинг — out-of-sample валидация</h2>
+          <p className="text-xs text-slate-500 mb-4">
+            Последние {backtesting.length} мес. использованы как тестовая выборка (модель их не видела при обучении).
+            {baselineMae != null && (
+              <> Naive baseline MAE: <span className="text-slate-300">{baselineMae}</span> — модель его{' '}
+              <span className={mae != null && baselineMae != null && mae < baselineMae ? 'text-emerald-400' : 'text-red-400'}>
+                {mae != null && baselineMae != null && mae < baselineMae ? 'превосходит' : 'не превосходит'}
+              </span>.</>
+            )}
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-700">
+                  {['Месяц', 'Факт', 'Прогноз', 'Ошибка', 'Ошибка %'].map((h) => (
+                    <th key={h} className="text-left py-2 px-4 text-xs font-medium text-slate-400 uppercase tracking-wide">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {backtesting.map((row: any, i: number) => {
+                  const errPct = row.actual > 0 ? ((row.error / row.actual) * 100).toFixed(1) : '—'
+                  const good = row.error <= row.actual * 0.2
+                  return (
+                    <tr key={i} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                      <td className="py-2 px-4 text-slate-300 font-medium">{row.month}</td>
+                      <td className="py-2 px-4 text-blue-400 font-bold">{row.actual}</td>
+                      <td className="py-2 px-4 text-yellow-400">{row.predicted}</td>
+                      <td className="py-2 px-4">
+                        <span className={good ? 'text-emerald-400' : 'text-orange-400'}>{row.error}</span>
+                      </td>
+                      <td className="py-2 px-4 text-slate-500 text-xs">{errPct}%</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {rmse != null && mape != null && (
+            <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-500 pt-3 border-t border-slate-700/50">
+              <span>Out-of-sample MAE: <span className="text-slate-200 font-medium">{mae}</span></span>
+              <span>RMSE: <span className="text-slate-200 font-medium">{rmse}</span></span>
+              <span>MAPE: <span className="text-slate-200 font-medium">{mape}%</span></span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Model info */}
       <div className="card bg-slate-800/50">

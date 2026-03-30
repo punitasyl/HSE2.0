@@ -35,10 +35,19 @@ const SAVINGS_LABELS: Record<string, { label: string; icon: React.ReactNode; col
   audit_efficiency:   { label: 'Эффективность аудитов',   icon: <BarChart3 size={16} />,    color: '#06b6d4' },
 }
 
+type ScenarioKey = 'pessimistic' | 'base' | 'optimistic'
+
+const SCENARIO_CONFIG: Record<ScenarioKey, { label: string; color: string; bg: string; border: string }> = {
+  pessimistic: { label: 'Пессимистичный', color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30' },
+  base:        { label: 'Базовый',        color: 'text-blue-400',   bg: 'bg-blue-500/10',   border: 'border-blue-500/30' },
+  optimistic:  { label: 'Оптимистичный', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' },
+}
+
 export default function EconomicEffect() {
   const [data, setData] = useState<any>(null)
   const [corrData, setCorrData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [activeScenario, setActiveScenario] = useState<ScenarioKey>('base')
 
   useEffect(() => {
     Promise.all([
@@ -53,8 +62,11 @@ export default function EconomicEffect() {
   if (loading) return <div className="text-slate-400 text-sm animate-pulse">Загрузка...</div>
   if (!data) return <div className="card text-red-400">Ошибка загрузки данных.</div>
 
-  const savings = data.savings || {}
+  const scenarioData = data.scenarios?.[activeScenario] ?? data
+  const savings = scenarioData.savings || data.savings || {}
   const totalKzt = savings.total || 0
+  const reductionPct = scenarioData.reduction_pct ?? data.predicted_reduction_pct
+  const cfg = SCENARIO_CONFIG[activeScenario]
 
   const chartData = Object.entries(savings)
     .filter(([k]) => k !== 'total')
@@ -72,12 +84,33 @@ export default function EconomicEffect() {
 
   return (
     <div className="space-y-6">
+      {/* Scenario switcher */}
+      <div className="flex gap-2 flex-wrap">
+        {(Object.keys(SCENARIO_CONFIG) as ScenarioKey[]).map((key) => {
+          const c = SCENARIO_CONFIG[key]
+          const active = activeScenario === key
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveScenario(key)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
+                active
+                  ? `${c.bg} ${c.border} ${c.color}`
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {c.label}
+            </button>
+          )
+        })}
+      </div>
+
       {/* Hero card */}
-      <div className="card bg-gradient-to-br from-blue-600/20 to-blue-900/20 border-blue-500/30">
+      <div className={`card bg-gradient-to-br from-blue-600/20 to-blue-900/20 ${cfg.border}`}>
         <div className="flex items-start justify-between">
           <div>
             <p className="text-xs text-blue-300 uppercase tracking-wide font-medium">
-              Общий экономический эффект
+              Экономический эффект · <span className={cfg.color}>{cfg.label} сценарий</span>
             </p>
             <p className="text-4xl font-black text-white mt-2">
               {fmt(totalKzt)} {data.currency}
@@ -94,15 +127,15 @@ export default function EconomicEffect() {
         <div className="grid grid-cols-3 gap-4 mt-6 pt-4 border-t border-blue-500/20">
           <div>
             <p className="text-xs text-blue-400">Снижение инцидентов</p>
-            <p className="text-xl font-bold text-white">{data.predicted_reduction_pct}%</p>
+            <p className={`text-xl font-bold ${cfg.color}`}>{reductionPct}%</p>
           </div>
           <div>
             <p className="text-xs text-blue-400">Предотвращено НС</p>
-            <p className="text-xl font-bold text-white">{data.prevented_accidents}</p>
+            <p className="text-xl font-bold text-white">{scenarioData.prevented_accidents ?? data.prevented_accidents}</p>
           </div>
           <div>
             <p className="text-xs text-blue-400">Предотвращено микротравм</p>
-            <p className="text-xl font-bold text-white">{data.prevented_microtraumas}</p>
+            <p className="text-xl font-bold text-white">{scenarioData.prevented_microtraumas ?? data.prevented_microtraumas}</p>
           </div>
         </div>
       </div>
@@ -243,7 +276,7 @@ export default function EconomicEffect() {
           </div>
           <div>
             <p className="text-xs text-slate-500">Прогноз снижения</p>
-            <p className="text-xl font-bold text-emerald-400 mt-1">−{data.predicted_reduction_pct}%</p>
+            <p className={`text-xl font-bold mt-1 ${cfg.color}`}>−{reductionPct}%</p>
           </div>
           <div>
             <p className="text-xs text-slate-500">Экономия в год</p>
@@ -255,6 +288,12 @@ export default function EconomicEffect() {
           </div>
         </div>
       </div>
+      {/* Methodology note */}
+      {data.methodology_note && (
+        <p className="text-xs text-slate-600 leading-relaxed px-1">
+          * {data.methodology_note}
+        </p>
+      )}
     </div>
   )
 }
